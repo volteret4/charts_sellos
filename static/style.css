@@ -328,7 +328,8 @@ body{background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,san
 .d-tracks li span:first-child{margin-right:6px}
 .d-dur{float:right;font-size:.64rem;opacity:.8}
 .d-err{font-size:.7rem;color:var(--warning)}
-#cands{margin-top:8px;max-height:45vh;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
+/* Hueco fijo: una barra superpuesta no reserva sitio y taparía las flechas ↗ */
+#cands{margin-top:8px;max-height:45vh;overflow-y:auto;padding-right:14px;display:flex;flex-direction:column;gap:3px}
 #cands[hidden]{display:none}
 .t-picker{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px}
 #sb-fetch label.t-opt,#grp-menu label.t-opt{display:flex;align-items:center;gap:5px;font-size:.72rem;text-transform:none;
