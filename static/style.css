@@ -330,6 +330,16 @@ body{background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,san
 .d-err{font-size:.7rem;color:var(--warning)}
 #cands{margin-top:8px;max-height:45vh;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
 #cands[hidden]{display:none}
+.t-picker{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px}
+#sb-fetch label.t-opt,#grp-menu label.t-opt{display:flex;align-items:center;gap:5px;font-size:.72rem;text-transform:none;
+  letter-spacing:0;margin:0;padding:2px 0;color:var(--text);cursor:pointer}
+#grp-menu .t-picker{padding:2px 12px 6px;min-width:230px}
+.t-quick{font-size:.64rem;color:var(--text-muted);margin:1px 0 3px}
+#grp-menu .t-quick{padding:0 12px}
+.t-quick a{color:var(--accent-2);cursor:pointer}
+#grp-menu .t-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:4px 12px 2px}
+.t-msg{flex:1;font-size:.66rem;color:var(--warning)}
+#sec-edit{white-space:nowrap}
 .c-msg{font-size:.68rem;color:var(--text-muted)}
 .c-err{color:var(--warning)}
 .c-src{font-size:.6rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-top:6px}

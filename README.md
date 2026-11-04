@@ -9,6 +9,8 @@ Visor al estilo de `charts_orpheus`, pero sin Orpheus: escribes el nombre de un 
 3. **Last.fm**: oyentes, escuchas, etiquetas, portada, wiki y canciones del disco; oyentes, escuchas, etiquetas, biografía y similares del artista. Con `LASTFM_USERNAME` también tus escuchas de cada disco. Se refresca a los 14 días.
 4. **YouTube**: `yt-dlp` busca de uno en uno y guarda hasta 5 vídeos cuyo título o canal nombren disco y artista (o el sello, en recopilatorios de varios artistas). Si un disco solo está subido pista a pista, valen los vídeos del artista que nombren una de sus canciones o su número de catálogo. Si aún no se ha buscado un disco, se busca al pulsarlo.
 
+Al añadir un sello eliges qué secciones traer (álbumes, EP, singles, recopilatorios…). El botón **Secciones** las cambia después: lo desmarcado desaparece y, al volver a marcarlo, no se repiten las consultas ya guardadas.
+
 El grid aparece al terminar el catálogo y se va rellenando. Un trabajo interrumpido continúa al reiniciar, sin repetir lo guardado.
 
 ## Uso

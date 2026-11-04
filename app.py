@@ -79,6 +79,8 @@ LASTFM_NO_COVER = '2a96cbd8b46e442fc41c2b86b821562f'
 LASTFM_TTL = 14 * 86400
 NO_VIDEO_TTL = 14 * 86400
 VARIOUS = 'various artists'
+RTYPES = ('Album', 'EP', 'Single', 'Compilation', 'Live album', 'Remix', 'Soundtrack', 'DJ Mix', 'Mixtape', 'Demo',
+          'Interview', 'Unknown')
 LONG_TYPES = {'Album', 'Compilation', 'Live album', 'Soundtrack', 'DJ Mix', 'Mixtape', 'Unknown'}
 
 
@@ -658,7 +660,12 @@ def _run_job(slug):
     merged = merge_catalogs(catalogs)
     if not merged:
         raise RuntimeError('Ninguna fuente ha devuelto discos de este sello')
-    job_log(f'{len(merged)} discos distintos')
+    total = len(merged)
+    if sources.get('types'):
+        merged = {k: v for k, v in merged.items() if v['rtype'] in sources['types']}
+        if not merged:
+            raise RuntimeError(f'El sello tiene {total} discos, pero ninguno en las secciones elegidas')
+    job_log(f'{len(merged)} de {total} discos distintos' if len(merged) != total else f'{total} discos distintos')
 
     with db() as con:
         con.execute('UPDATE labels SET info=? WHERE slug=?', (json.dumps(infos, ensure_ascii=False), slug))
@@ -772,6 +779,7 @@ def label_data(slug):
                            (slug,)).fetchall()
     return {
         'label': {'slug': slug, 'name': label['name'], 'status': label['status'], 'error': label['error'],
+                  'types': json.loads(label['sources']).get('types'),
                   'info': json.loads(label['info'] or '{}')},
         'albums': [{'key': r['album_key'], 'artist': r['artist'], 'album': r['album'], 'rtype': r['rtype'] or 'Unknown',
                     'year': r['year'], 'date': r['date'], 'catno': r['catno'], 'covers': _covers(r),
@@ -828,13 +836,13 @@ def save_groups(groups):
     return clean
 
 
-def create_label(name, mb_ids, discogs_ids):
+def create_label(name, mb_ids, discogs_ids, types=None):
     slug = slugify(name)
     with db() as con:
         prev = con.execute('SELECT created FROM labels WHERE slug=?', (slug,)).fetchone()
         con.execute("""INSERT OR REPLACE INTO labels (slug, name, sources, status, created, updated)
                        VALUES (?,?,?,'queued',?,?)""",
-                    (slug, name, json.dumps({'mb': mb_ids, 'discogs': discogs_ids}),
+                    (slug, name, json.dumps({'mb': mb_ids, 'discogs': discogs_ids, 'types': types}),
                      prev['created'] if prev else time.time(), time.time()))
     return slug
 
@@ -930,6 +938,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/fetch':
             slug = d.get('slug')
+            # Sin «types» (o con null) el sello trae todas las secciones
+            types = d.get('types')
+            if types is not None and not (isinstance(types, list) and types and set(types) <= set(RTYPES)):
+                self._json({'error': 'Elige al menos una sección'}, 400)
+                return
             if not slug:
                 name = str(d.get('name') or '').strip()
                 mb_ids = [str(x) for x in d.get('mb') or []]
@@ -937,11 +950,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not name or not (mb_ids or discogs_ids):
                     self._json({'error': 'Elige al menos un sello'}, 400)
                     return
-                slug = create_label(name, mb_ids, discogs_ids)
+                slug = create_label(name, mb_ids, discogs_ids, types)
             else:
                 with db() as con:
-                    n = con.execute("UPDATE labels SET status='queued' WHERE slug=?", (slug,)).rowcount
-                if not n:
+                    row = con.execute('SELECT sources FROM labels WHERE slug=?', (slug,)).fetchone()
+                    if row and 'types' in d:
+                        con.execute('UPDATE labels SET sources=? WHERE slug=?',
+                                    (json.dumps({**json.loads(row['sources']), 'types': types}), slug))
+                    con.execute("UPDATE labels SET status='queued' WHERE slug=?", (slug,))
+                if not row:
                     self._json({'error': 'No existe'}, 404)
                     return
             self._json({'ok': True, 'slug': slug, 'queued': enqueue(slug)})

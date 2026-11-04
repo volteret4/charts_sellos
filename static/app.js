@@ -293,6 +293,13 @@ async function mergeLabel() {
   const key = SRC, d = key && await fetchLabel(key);
   if (!d || key !== SRC) return;
   LABEL = d.label;
+  // Una sección desmarcada desaparece; lo que suena sigue sonando
+  const keep = new Set(d.albums.map(a => a.key));
+  if (ALL.some(a => !keep.has(a.key))) {
+    ALL = ALL.filter(a => keep.has(a.key));
+    ALL.forEach((a, i) => { a.uid = i; });
+    current = CUR && ALL.includes(CUR) ? CUR.uid : -1;
+  }
   const byKey = new Map(ALL.map(a => [a.key, a]));
   for (const a of d.albums) {
     const prev = byKey.get(a.key);
@@ -601,6 +608,43 @@ window.addEventListener('blur', () => setTimeout(() => {
   if (f && f.tagName === 'IFRAME' && f.closest('#d-player-wrap')) f.blur();
 }, 0));
 
+// ── Selector de secciones ─────────────────────────────────────────────────────
+// null = todas. Las nuevas búsquedas parten de la última elección.
+function typePicker(selected) {
+  return `<div class="t-quick"><a data-all="1">todas</a> · <a data-all="0">ninguna</a></div><div class="t-picker">`
+    + RTYPES.map(t => `<label class="t-opt"><input type="checkbox" value="${esc(t)}"${!selected || selected.includes(t) ? ' checked' : ''}> ${esc(RTYPE_LABEL[t])}</label>`).join('')
+    + `</div>`;
+}
+function bindPicker(root) {
+  root.querySelectorAll('.t-quick a').forEach(a => a.addEventListener('click', () =>
+    root.querySelectorAll('.t-opt input').forEach(i => { i.checked = a.dataset.all === '1'; })));
+}
+function pickedTypes(root) {
+  const v = [...root.querySelectorAll('.t-opt input:checked')].map(i => i.value);
+  return {none: !v.length, types: v.length === RTYPES.length ? null : v};
+}
+function lastTypes() {
+  try { return JSON.parse(localStorage.getItem('sellos-types')); } catch (e) { return null; }
+}
+
+document.getElementById('sec-edit').addEventListener('click', e => {
+  e.stopPropagation();
+  grpMenu.innerHTML = `<div class="gm-title">Secciones de «${esc(LABEL.name)}»</div>` + typePicker(LABEL.types)
+    + `<div class="t-actions"><span class="t-msg"></span><button class="q-btn t-apply">Aplicar</button></div>`;
+  bindPicker(grpMenu);
+  grpMenu.querySelector('.t-apply').addEventListener('click', async () => {
+    const p = pickedTypes(grpMenu);
+    if (p.none) { grpMenu.querySelector('.t-msg').textContent = 'Elige al menos una'; return; }
+    grpMenu.hidden = true;
+    const r = await runFetch({slug: LABEL.slug, types: p.types});
+    if (r) LABEL.types = p.types;
+  });
+  grpMenu.hidden = false;
+  const r = e.currentTarget.getBoundingClientRect();
+  grpMenu.style.left = Math.min(r.left, innerWidth - grpMenu.offsetWidth - 8) + 'px';
+  grpMenu.style.top = (r.bottom + 4) + 'px';
+});
+
 // ── Añadir un sello: buscar, elegir y lanzar ──────────────────────────────────
 const fetchBtn = document.getElementById('fetch-btn'), fetchInput = document.getElementById('fetch-id'), cands = document.getElementById('cands');
 const SOURCE_NAME = {mb: 'MusicBrainz', discogs: 'Discogs'};
@@ -634,14 +678,19 @@ function renderCandidates(q, r) {
       + (safeUrl(c.url) ? `<a href="${esc(c.url)}" target="_blank" rel="noopener" title="Ver ficha">↗</a>` : '') + `</label>`).join('');
   }).join('');
   cands.innerHTML = errs + `<div class="c-msg">Marca el sello en cada fuente; los homónimos son sellos distintos.</div>${bySource}`
+    + `<div class="c-src">Secciones a añadir</div>${typePicker(lastTypes())}<div class="c-msg c-err" id="c-types-msg"></div>`
     + `<div class="c-actions"><button class="q-btn" id="c-cancel">Cancelar</button><button id="c-add">Añadir</button></div>`;
+  bindPicker(cands);
   document.getElementById('c-cancel').addEventListener('click', () => { cands.hidden = true; });
   document.getElementById('c-add').addEventListener('click', async () => {
-    const chosen = [...cands.querySelectorAll('input:checked')].map(i => list[+i.dataset.i]);
-    if (!chosen.length) return;
+    const chosen = [...cands.querySelectorAll('.c-item input:checked')].map(i => list[+i.dataset.i]);
+    const picked = pickedTypes(cands), warn = document.getElementById('c-types-msg');
+    if (!chosen.length) { warn.textContent = 'Marca al menos un sello'; return; }
+    if (picked.none) { warn.textContent = 'Marca al menos una sección'; return; }
+    localStorage.setItem('sellos-types', JSON.stringify(picked.types));
     const body = {name: (chosen.find(c => c.source === 'mb') || chosen[0]).name.replace(/\s*\(\d+\)$/, ''),
       mb: chosen.filter(c => c.source === 'mb').map(c => c.id),
-      discogs: chosen.filter(c => c.source === 'discogs').map(c => c.id)};
+      discogs: chosen.filter(c => c.source === 'discogs').map(c => c.id), types: picked.types};
     cands.hidden = true;
     fetchInput.value = '';
     const res = await runFetch(body);
