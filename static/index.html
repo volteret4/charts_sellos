@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/theme-palettes.css">
+<link rel="stylesheet" href="/style.css">
+<title>Charts de sellos</title>
+<!-- Iconos Airsonic / qBittorrent / escuchado / Mix (servicio ya-lo-tengo) -->
+<script>(function(){var s=document.createElement('script');s.src=location.protocol+'//'+location.hostname+':8780/owned-badges.js';document.head.appendChild(s);})();</script>
+</head>
+<body>
+
+<div id="sidebar">
+  <div id="sb-head"><h1><span>▶</span> Charts de sellos</h1><button id="grp-add" title="Crear un grupo">+ Grupo</button></div>
+  <div id="sb-list"></div>
+  <div id="sb-fetch">
+    <label for="fetch-id">Añadir un sello</label>
+    <div id="fetch-row">
+      <input id="fetch-id" type="text" placeholder="Nombre del sello…" autocomplete="off">
+      <button id="fetch-btn">Buscar</button>
+    </div>
+    <div id="cands" hidden></div>
+  </div>
+</div>
+
+<div id="grp-menu" hidden></div>
+
+<div id="job-float" hidden>
+  <div id="jf-head"><span id="jf-title"></span><button id="jf-close" title="Cerrar">×</button></div>
+  <div id="jf-name"></div>
+  <div id="jf-phase"><span id="jf-phase-txt"></span><span id="jf-pct"></span></div>
+  <div id="jf-bar"><div id="jf-fill"></div></div>
+  <div id="jf-current"></div>
+  <div id="jf-queue"></div>
+  <pre id="jf-log"></pre>
+</div>
+
+<div id="main">
+  <div id="grid-panel">
+    <div id="toolbar" style="display:none">
+      <span id="col-title"></span>
+      <input id="search" type="text" placeholder="Buscar artista o álbum…" autocomplete="off">
+      <select id="tag-filter" title="Filtrar por etiqueta de Last.fm"><option value="">Todas las etiquetas</option></select>
+      <select id="sort" title="Ordenar">
+        <option value="listeners">Más oyentes</option>
+        <option value="playcount">Más escuchas</option>
+        <option value="year-desc">Más recientes</option>
+        <option value="year-asc">Más antiguos</option>
+        <option value="artist">Artista A-Z</option>
+      </select>
+      <span id="grid-count"></span>
+    </div>
+    <div id="label-info" hidden></div>
+    <div id="grid-wrap" style="display:none"><div id="grid"></div></div>
+    <div id="placeholder">
+      <span>🎵</span>
+      Busca un sello en el panel izquierdo
+    </div>
+  </div>
+  <div id="detail">
+    <div id="d-placeholder">← Selecciona un álbum</div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+<script src="/theme-picker.js"></script>
+<script src="/settings-panel.js"></script>
+</body>
+</html>
