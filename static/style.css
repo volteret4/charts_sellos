@@ -73,7 +73,7 @@ body{background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,san
 #sb-fetch label{font-size:.7rem;color:var(--text-muted);text-transform:uppercase;
                 letter-spacing:.06em;display:block;margin-bottom:6px}
 #fetch-row{display:flex;gap:6px}
-#fetch-id{flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;
+#fetch-id{flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;
           color:var(--text);padding:6px 9px;font-size:.82rem;outline:none}
 #fetch-id:focus{border-color:var(--accent)}
 #fetch-id::placeholder{color:var(--text-muted)}
@@ -262,6 +262,8 @@ body{background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,san
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+/* Firefox no entiende ::-webkit-scrollbar; en Chromium, scrollbar-color lo anularía */
+@supports not selector(::-webkit-scrollbar){*{scrollbar-width:thin;scrollbar-color:var(--border) transparent}}
 
 /* ── Responsive: tablet (≤768px) ── */
 @media (max-width: 768px) {
