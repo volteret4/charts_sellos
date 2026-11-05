@@ -1,6 +1,40 @@
 # Charts de sellos
 
-Visor al estilo de `charts_orpheus`, pero sin Orpheus: escribes el nombre de un sello y muestra todo lo que ha publicado, con vídeos de YouTube y la información de Last.fm.
+Escribes el nombre de un sello y muestra todo lo que ha publicado, con vídeos de YouTube y la información de Last.fm.
+
+## Para qué sirve
+
+Para explorar el catálogo de un sello de un vistazo: un mosaico de portadas con vídeos de YouTube e información de Last.fm, guardado en tu servidor para no repetir consultas.
+
+## Instalación individual
+
+Necesitas Docker.
+
+```bash
+git clone https://github.com/volteret4/charts_sellos.git
+```
+
+```bash
+cd charts_sellos && cp .env.example .env && mkdir -p data
+```
+
+```bash
+docker build -t charts-sellos .
+```
+
+```bash
+docker run -d --name charts-sellos --restart unless-stopped --env-file .env -e CHARTS_DATA_DIR=/app/data -v "$PWD/data:/app/data" -p 8792:8792 charts-sellos
+```
+
+Se abre en <http://localhost:8792>.
+
+## Instalación desde REPEAT-ONE
+
+Este módulo forma parte de [REPEAT-ONE](https://volteret4.github.io/repeat-one-web/), que permite elegir qué módulos instalar: [ver la instalación](https://github.com/volteret4/repeat-one-web#instalación). Allí se llama `charts_sellos`.
+
+## Versión pública
+
+Hay una [versión para navegador](https://volteret4.github.io/charts-web/sellos/) que no necesita servidor: guarda las búsquedas en tu navegador y usa tus propias claves.
 
 ## Cómo funciona
 
@@ -13,15 +47,9 @@ Al añadir un sello eliges qué secciones traer (álbumes, EP, singles, recopila
 
 El grid aparece al terminar el catálogo y se va rellenando. Un trabajo interrumpido continúa al reiniciar, sin repetir lo guardado.
 
-## Uso
+## Desarrollo
 
-```bash
-./scripts/up.sh
-```
-
-Elige el perfil `charts_sellos`. La web queda en el puerto 8792.
-
-Para desarrollo, sin Docker y desde esta carpeta (lee `.env` si existe):
+Sin Docker y desde esta carpeta (lee `.env` si existe):
 
 ```bash
 pip install -r requirements.txt && python app.py
@@ -49,4 +77,4 @@ Si responde «Sign in to confirm you're not a bot», el trabajo se detiene y el 
 ## Código
 
 - `app.py`: servidor sin dependencias web, trabajos en segundo plano y SQLite (`data/charts_sellos.db`).
-- `static/app.js`: la web. El reproductor y los grupos vienen de `charts_orpheus`.
+- `static/app.js`: la web.

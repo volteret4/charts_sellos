@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""charts_sellos — como charts_orpheus, pero a partir del nombre de un sello.
+"""charts_sellos — charts a partir del nombre de un sello.
 
 Catálogo: MusicBrainz + Discogs. Información: Last.fm. Vídeos: yt-dlp.
 Abrir: http://localhost:8792

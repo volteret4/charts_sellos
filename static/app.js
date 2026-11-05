@@ -1,4 +1,4 @@
-// Reproductor y grupos vienen de charts_orpheus; lo demás es propio de sellos.
+// Reproductor, grupos y lo propio de sellos.
 let ALL = [], current = -1, pollTimer = null, LABEL = null;
 let QUEUE = [], qi = -1, CUR = null, ytPlayer = null, navDir = 1, playToken = 0;
 let SOURCES = [], GROUPS = [], SRC = null, loadToken = 0, lastFinished = null;
