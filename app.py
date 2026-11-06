@@ -512,6 +512,7 @@ class YtBlocked(Exception):
 
 _yt_slots = threading.BoundedSemaphore(YT_WORKERS)   # cuenta también las búsquedas de clic
 YT_BLOCK_PAUSE, YT_BLOCK_PAUSE_MAX = 30 * 60, 4 * 3600
+YT_RETRY_WAITS = (3, 8, 20)
 _GENERIC_WORDS = {'ep', 'lp', 'remix', 'remixes', 'reworks', 'edits', 'the', 'a'}
 _BAD_WORDS = {'reaction', 'review', 'unboxing', 'interview', 'trailer', 'tutorial', 'karaoke', 'lesson', 'teaser'}
 
@@ -572,6 +573,17 @@ def rank_videos(entries, artist, album, rtype, total_secs=0, label='', tracks=()
     return [v for _, v in ranked[:5]]
 
 
+def yt_run(cmd):
+    """Lanza yt-dlp. YouTube rechaza con 403 búsquedas sueltas al azar y yt-dlp no reintenta
+    los 403; sin dormir con la plaza ocupada, para no frenar a los otros workers."""
+    for wait in (*YT_RETRY_WAITS, None):
+        with _yt_slots:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if not proc.returncode or wait is None or 'HTTP Error 403' not in proc.stderr:
+            return proc
+        time.sleep(wait)
+
+
 def yt_search(artist, album, rtype, total_secs=0, label='', tracks=(), catno=''):
     who = label if is_various(artist) else artist
     query = f'{who} {album}'.strip() + (' full album' if rtype in LONG_TYPES else '')
@@ -579,8 +591,7 @@ def yt_search(artist, album, rtype, total_secs=0, label='', tracks=(), catno='')
            '--socket-timeout', '20']
     if os.path.exists(COOKIES):
         cmd += ['--cookies', COOKIES]
-    with _yt_slots:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    proc = yt_run(cmd)
     if proc.returncode:
         err = proc.stderr.strip()
         if 'confirm you' in err or 'Sign in' in err:
