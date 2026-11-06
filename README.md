@@ -36,6 +36,10 @@ Este módulo forma parte de [REPEAT-ONE](https://volteret4.github.io/repeat-one-
 
 Hay una [versión para navegador](https://volteret4.github.io/charts-web/sellos/) que no necesita servidor: guarda las búsquedas en tu navegador y usa tus propias claves.
 
+## Cambiar a otro servicio
+
+Con `CHARTS_SWITCH=Nombre:puerto,Nombre:puerto` en el `.env`, la barra lateral muestra un selector con los servicios de ese mismo host que estén respondiendo. Sin la variable no aparece.
+
 ## Cómo funciona
 
 1. **Búsqueda**: se piden candidatos a MusicBrainz y Discogs. Se marca por defecto la coincidencia exacta de cada fuente, y puedes cambiarla porque hay muchos sellos homónimos.

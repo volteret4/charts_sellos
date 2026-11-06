@@ -34,7 +34,18 @@ STATIC_FILES = {
     '/theme-palettes.css': ('theme-palettes.css', 'text/css; charset=utf-8'),
     '/theme-picker.js': ('theme-picker.js', 'application/javascript; charset=utf-8'),
     '/settings-panel.js': ('settings-panel.js', 'application/javascript; charset=utf-8'),
+    '/charts-switch.js': ('charts-switch.js', 'application/javascript; charset=utf-8'),
 }
+
+
+def switch_items():
+    """Servicios del selector, de CHARTS_SWITCH=Nombre:puerto,Nombre:puerto (vacío: sin selector)."""
+    items = []
+    for part in os.environ.get('CHARTS_SWITCH', '').split(','):
+        label, _, port = part.strip().rpartition(':')
+        if label and port.isdigit():
+            items.append({'label': label, 'port': int(port), 'current': int(port) == PORT})
+    return items
 
 SETTINGS_ENV_PATH = os.path.join(APP_DIR, '.env')
 
@@ -1008,6 +1019,9 @@ class Handler(BaseHTTPRequestHandler):
             fname, ctype = STATIC_FILES[path]
             with open(os.path.join(STATIC_DIR, fname), 'rb') as f:
                 self._send(f.read(), ctype)
+            return
+        if path == '/api/switch':
+            self._json(switch_items())
             return
         if path == '/api/search':
             if not arg('q'):
