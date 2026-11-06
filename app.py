@@ -840,7 +840,7 @@ def resume_jobs():
     """Un reinicio a medias no pierde nada: lo guardado no se vuelve a pedir."""
     with db() as con:
         rows = con.execute("""SELECT slug, status FROM labels WHERE status IN ('queued','running','youtube')
-                              ORDER BY updated""").fetchall()
+                              ORDER BY status = 'running' DESC, updated""").fetchall()
     for r in rows:
         if r['status'] == 'youtube':
             _push(_yt, _run_videos, r['slug'])
