@@ -82,7 +82,7 @@ function sourceItem(src, inGroup) {
   div.dataset.key = src.key;
   const types = RTYPES.filter(t => src.types[t]).slice(0, 3)
     .map(t => `${src.types[t]} ${RTYPE_SHORT[t] || t.toLowerCase()}`).join(' · ') || 'sin datos aún';
-  const state = {queued: ' · en cola', running: ' · actualizando', error: ' · ✗ error', partial: ' · ⚠ incompleto'}[src.status] || '';
+  const state = {queued: ' · en cola', running: ' · actualizando', youtube: ' · vídeos pendientes', error: ' · ✗ error', partial: ' · ⚠ incompleto'}[src.status] || '';
   div.innerHTML = `<div class="col-main"><span class="col-name">${esc(src.name)}</span>`
     + `<span class="col-count" title="${esc(src.error || '')}">${esc(types + state)}</span></div>`
     + `<button class="col-refresh" title="Actualizar catálogo, Last.fm y vídeos que falten">↻</button>`
@@ -706,28 +706,41 @@ const jobFloat = document.getElementById('job-float');
 let floatDismissed = false, floatHideTimer = null, pollCount = 0;
 document.getElementById('jf-close').addEventListener('click', () => { floatDismissed = true; jobFloat.hidden = true; });
 
+function renderStage(el, title, s, names) {
+  const pct = s.total ? s.done / s.total : null;
+  const q = s.queue.length ? `En cola (${s.queue.length}): ` + s.queue.map(c => names[c] || c).join(' · ') : '';
+  const paused = s.paused_until ? ` · reintento a las ${new Date(s.paused_until * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}` : '';
+  const problem = s.error || s.warning;
+  const fill = !s.running ? (problem ? 'err' : 'done') : s.paused_until ? 'err' : '';
+  el.innerHTML = `<div class="jf-stage-title">${title}</div>`
+    + (s.name ? `<div class="jf-name"></div>
+       <div class="jf-phase"><span>${esc(s.phase || '')}${s.total ? `: ${s.done} / ${s.total}` : ''}${paused}</span><span>${pct != null ? Math.round(pct * 100) + '%' : ''}</span></div>
+       <div class="jf-bar"><div class="jf-fill ${fill}" style="width:${(!s.running && !problem ? 1 : pct || 0) * 100}%"></div></div>
+       <div class="jf-current"></div>` : '<div class="jf-phase">En espera</div>')
+    + (q ? '<div class="jf-queue"></div>' : '');
+  if (s.name) {
+    el.querySelector('.jf-name').textContent = s.name;
+    el.querySelector('.jf-current').textContent = problem || (s.current.length ? '♪ ' + s.current.join(' · ') : '');
+    el.querySelector('.jf-current').classList.toggle('problem', !!problem);
+  }
+  if (q) el.querySelector('.jf-queue').textContent = q;
+}
+
 function updateFloat(s) {
   if (floatDismissed) return;
   clearTimeout(floatHideTimer);
   jobFloat.hidden = false;
-  const idle = !s.running, bad = idle && (s.error || s.warning);
-  const state = s.running ? '' : bad ? 'err' : 'done';
+  const stages = [s.data, s.youtube];
+  const idle = !s.running, bad = idle && stages.some(x => x.error || x.warning);
   const title = document.getElementById('jf-title');
-  title.className = state;
-  title.textContent = s.running ? '⏳ Añadiendo…' : bad ? '✗ ' + (s.error ? 'Error' : 'Incompleto') : '✓ Completado';
-  const q = s.queue || [];
+  title.className = idle ? (bad ? 'err' : 'done') : '';
+  title.textContent = !idle ? (s.youtube.paused_until ? '⏸ YouTube en pausa' : '⏳ Añadiendo…')
+    : bad ? '✗ ' + (stages.some(x => x.error) ? 'Error' : 'Incompleto') : '✓ Completado';
   const names = Object.fromEntries(SOURCES.map(x => [x.key, x.name]));
-  document.getElementById('jf-queue').textContent = q.length ? `En cola (${q.length}): ` + q.map(c => names[c] || c).join(' · ') : '';
-  document.getElementById('jf-name').textContent = s.name || '';
-  const pct = s.total ? s.done / s.total : null;
-  document.getElementById('jf-phase-txt').textContent = s.phase + (s.total ? `: ${s.done} / ${s.total}` : '');
-  document.getElementById('jf-pct').textContent = pct != null ? Math.round(pct * 100) + '%' : '';
-  const fill = document.getElementById('jf-fill');
-  fill.className = state;
-  fill.style.width = (idle && !bad ? 100 : (pct || 0) * 100) + '%';
-  document.getElementById('jf-current').textContent = s.error || s.warning || (s.current ? '♪ ' + s.current : '');
+  renderStage(document.getElementById('jf-data'), 'Catálogo y Last.fm', s.data, names);
+  renderStage(document.getElementById('jf-youtube'), `YouTube (${s.workers} a la vez)`, s.youtube, names);
   document.getElementById('jf-log').textContent = (s.log || '').split('\n').slice(-6).join('\n');
-  if (idle && !bad && !q.length) floatHideTimer = setTimeout(() => { jobFloat.hidden = true; }, 8000);
+  if (idle && !bad) floatHideTimer = setTimeout(() => { jobFloat.hidden = true; }, 8000);
 }
 
 async function runFetch(body) {
@@ -742,15 +755,15 @@ function pollJob(delay = 1500) {
   clearTimeout(pollTimer);
   pollTimer = setTimeout(async () => {
     const s = await api('/api/job');
-    if (s.phase) updateFloat(s);
-    const pending = s.running || (s.queue && s.queue.length);
+    if (s.data.name || s.youtube.name) updateFloat(s);
+    const pending = s.running;
     const changed = lastFinished !== null && s.finished !== lastFinished;
     // Cada 6 s se refresca lo que se está rellenando, y siempre al terminar
     pollCount++;
     if (changed || (pending && pollCount % 4 === 0)) {
       [SOURCES] = await Promise.all([api('/api/sources')]);
       renderSidebar();
-      if (SRC && (changed || SRC === s.slug)) await mergeLabel();
+      if (SRC && (changed || SRC === s.data.slug || SRC === s.youtube.slug)) await mergeLabel();
     }
     lastFinished = s.finished;
     if (pending) pollJob();
@@ -759,4 +772,4 @@ function pollJob(delay = 1500) {
 
 // ── Arranque ──────────────────────────────────────────────────────────────────
 loadList();
-api('/api/job').then(s => { lastFinished = s.finished; if (s.running || (s.queue && s.queue.length)) pollJob(); });
+api('/api/job').then(s => { lastFinished = s.finished; if (s.running) pollJob(); });

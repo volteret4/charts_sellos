@@ -61,6 +61,11 @@ for _k, _v in _read_env_file(SETTINGS_ENV_PATH).items():
     os.environ.setdefault(_k, _v)
 
 LASTFM_API_KEY = os.environ.get('LASTFM_API_KEY', '')
+try:
+    # Búsquedas de YouTube simultáneas. Cada una suma ~1700 búsquedas/h, desde la misma IP
+    YT_WORKERS = max(1, int(os.environ.get('YT_WORKERS') or 2))
+except ValueError:
+    YT_WORKERS = 2
 LASTFM_USER = os.environ.get('LASTFM_USERNAME', '')
 DISCOGS_TOKEN = os.environ.get('DISCOGS_TOKEN', '')
 SETTINGS_PASSWORD = os.environ.get('SETTINGS_PASSWORD', '')
@@ -68,6 +73,7 @@ VARS_SPEC = [
     {'name': 'LASTFM_API_KEY', 'secret': True, 'help': 'API key de Last.fm'},
     {'name': 'LASTFM_USERNAME', 'secret': False, 'help': 'Usuario de Last.fm (opcional: añade tus escuchas de cada disco)'},
     {'name': 'DISCOGS_TOKEN', 'secret': True, 'help': 'Token de Discogs (sin él solo se usa MusicBrainz)'},
+    {'name': 'YT_WORKERS', 'secret': False, 'help': 'Búsquedas de YouTube simultáneas (2 por defecto). Más rápido, pero más riesgo de bloqueo'},
 ]
 
 UA = 'charts_sellos/1.0 ( https://github.com/volteret4/repeat-one )'
@@ -493,7 +499,8 @@ class YtBlocked(Exception):
     """YouTube pide confirmar que no somos un bot: reintentar ahora no serviría."""
 
 
-_yt_lock = threading.Lock()   # una búsqueda a la vez, también con las de clic
+_yt_slots = threading.BoundedSemaphore(YT_WORKERS)   # cuenta también las búsquedas de clic
+YT_BLOCK_PAUSE, YT_BLOCK_PAUSE_MAX = 30 * 60, 4 * 3600
 _GENERIC_WORDS = {'ep', 'lp', 'remix', 'remixes', 'reworks', 'edits', 'the', 'a'}
 _BAD_WORDS = {'reaction', 'review', 'unboxing', 'interview', 'trailer', 'tutorial', 'karaoke', 'lesson', 'teaser'}
 
@@ -561,7 +568,7 @@ def yt_search(artist, album, rtype, total_secs=0, label='', tracks=(), catno='')
            '--socket-timeout', '20']
     if os.path.exists(COOKIES):
         cmd += ['--cookies', COOKIES]
-    with _yt_lock:
+    with _yt_slots:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if proc.returncode:
         err = proc.stderr.strip()
@@ -590,9 +597,22 @@ def fill_videos(key, artist, album, rtype, force=False, label=''):
 
 
 # ── Trabajos en segundo plano ─────────────────────────────────────────────────
-_job = {'running': False, 'slug': None, 'name': None, 'phase': None, 'done': 0, 'total': 0, 'current': None,
-        'queue': [], 'finished': 0, 'error': None, 'warning': None, 'log': '', 'last_slug': None}
+_job = {'finished': 0, 'log': ''}
 _job_lock = threading.Lock()
+
+
+def _new_stage():
+    return {'running': False, 'slug': None, 'name': None, 'phase': None, 'done': 0, 'total': 0, 'current': [],
+            'queue': [], 'error': None, 'warning': None, 'cancel': False, 'paused_until': None}
+
+
+# Dos colas independientes: un sello pasa por la primera y luego por la segunda, porque
+# YouTube elige mejor sabiendo las canciones y la duración que da Last.fm. Así YouTube,
+# que es lo lento, no hace esperar a Last.fm de los sellos siguientes.
+_data = _new_stage()   # catálogo + Last.fm
+_yt = _new_stage()     # búsquedas de vídeos
+_yt_wake = threading.Event()   # interrumpe la pausa tras un bloqueo
+_yt_backoff = 0
 
 
 def job_log(line):
@@ -601,48 +621,77 @@ def job_log(line):
         _job['log'] = '\n'.join((_job['log'].split('\n') + [line])[-40:]).lstrip('\n')
 
 
+def job_state():
+    with _job_lock:
+        snapshot = lambda s: {**s, 'queue': list(s['queue']), 'current': list(s['current'])}
+        return {**_job, 'running': _data['running'] or _yt['running'], 'workers': YT_WORKERS,
+                'data': snapshot(_data), 'youtube': snapshot(_yt)}
+
+
 def set_status(slug, status, error=None):
     with db() as con:
         con.execute('UPDATE labels SET status=?, error=?, updated=? WHERE slug=?', (status, error, time.time(), slug))
 
 
-def enqueue(slug):
-    """Arranca o deja en cola. Devuelve la posición (0 = ya empieza)."""
+def _push(stage, run, slug):
     with _job_lock:
-        if _job['running']:
-            if slug != _job['slug'] and slug not in _job['queue']:
-                _job['queue'].append(slug)
-            return _job['queue'].index(slug) + 1 if slug in _job['queue'] else 0
-        _job['running'] = True
-    threading.Thread(target=_worker, args=(slug,), daemon=True).start()
-    return 0
+        if slug in stage['queue']:
+            return
+        stage['queue'].append(slug)
+        if stage['running']:
+            return
+        stage['running'] = True
+    threading.Thread(target=_stage_loop, args=(stage, run), daemon=True).start()
 
 
-def _worker(slug):
-    while slug is not None:
+def _stage_loop(stage, run):
+    while True:
+        with _job_lock:
+            if not stage['queue']:
+                stage.update(running=False, slug=None, current=[])
+                return
+            slug = stage['queue'].pop(0)
+            stage.update(slug=slug, done=0, total=0, current=[], error=None, warning=None, cancel=False,
+                         paused_until=None)
         try:
-            _run_job(slug)
+            run(slug)
         except Exception as e:
             job_log(f'Error: {e}')
             with _job_lock:
-                _job['error'] = str(e)
+                stage['error'] = str(e)
             set_status(slug, 'error', str(e))
         with _job_lock:
             _job['finished'] += 1
-            _job['last_slug'] = slug
-            slug = _job['queue'].pop(0) if _job['queue'] else None
-            _job['running'] = slug is not None
+            stage.update(slug=None, current=[])
 
 
-def _run_job(slug):
+def enqueue(slug):
+    """(Re)empieza por el catálogo; si estaba buscando vídeos, deja de hacerlo."""
+    with _job_lock:
+        if slug in _yt['queue']:
+            _yt['queue'].remove(slug)
+        if _yt['slug'] == slug:
+            _yt['cancel'] = True
+            _yt_wake.set()
+    _push(_data, _run_catalog, slug)
+
+
+def _to_youtube(slug):
+    set_status(slug, 'youtube')
+    with _job_lock:
+        again = slug in _data['queue']   # han pulsado ↻ mientras tanto
+    if not again:
+        _push(_yt, _run_videos, slug)
+
+
+def _run_catalog(slug):
     with db() as con:
         row = con.execute('SELECT * FROM labels WHERE slug=?', (slug,)).fetchone()
     if not row:
         return
     sources = json.loads(row['sources'])
     with _job_lock:
-        _job.update(slug=slug, name=row['name'], phase='Catálogo', done=0, total=0, current=None,
-                    error=None, warning=None, log='')
+        _data.update(name=row['name'], phase='Catálogo')
     set_status(slug, 'running')
 
     infos, catalogs = {}, []
@@ -685,50 +734,104 @@ def _run_job(slug):
     now = time.time()
     pending = [r for r in rows if not r['lastfm_at'] or now - r['lastfm_at'] > LASTFM_TTL]
     with _job_lock:
-        _job.update(phase='Last.fm', done=0, total=len(pending))
+        _data.update(phase='Last.fm', done=0, total=len(pending))
 
     def lastfm_one(r):
         with _job_lock:
-            _job['current'] = f"{r['artist']} — {r['album']}"
+            _data['current'] = [f"{r['artist']} — {r['album']}"]
         try:
             fill_lastfm(r['album_key'], r['artist'], r['album'], force=bool(r['lastfm_at']))
         except LastfmError as e:
             job_log(f"Last.fm: {r['artist']} — {r['album']}: {e}")
         with _job_lock:
-            _job['done'] += 1
+            _data['done'] += 1
 
     with concurrent.futures.ThreadPoolExecutor(4) as ex:
         list(ex.map(lastfm_one, pending))
 
-    # YouTube: de uno en uno, para no provocar el bloqueo anti-bot
+    _to_youtube(slug)
+
+
+def _videos_pass(rows, owner):
+    """Una pasada por los discos. Devuelve (bloqueo, fallo repetido); lo guardado no se repite."""
+    global _yt_backoff
+    stop = threading.Event()
+    state = {'failures': 0, 'blocked': None, 'broken': None}
     with _job_lock:
-        _job.update(phase='YouTube', done=0, total=len(rows))
-    failures = 0
-    for r in rows:
+        _yt['done'] = 0
+
+    def one(r):
+        global _yt_backoff
         with _job_lock:
-            _job['current'] = f"{r['artist']} — {r['album']}"
+            if stop.is_set() or _yt['cancel']:
+                return
+            who = f"{r['artist']} — {r['album']}"
+            _yt['current'].append(who)
         try:
-            if fill_videos(r['album_key'], r['artist'], r['album'], r['rtype'], label=row['name']):
-                time.sleep(1)
-                failures = 0
+            if fill_videos(r['album_key'], r['artist'], r['album'], r['rtype'], label=owner):
+                with _job_lock:
+                    state['failures'] = 0
+                    _yt_backoff = 0
+                time.sleep(1)   # cada worker hace ~1700 búsquedas/h; ver YT_WORKERS
         except YtBlocked as e:
-            msg = f'YouTube ha bloqueado las búsquedas ({e}). Añade data/cookies.txt y pulsa ↻.'
-            job_log(msg)
-            with _job_lock:
-                _job['warning'] = msg
-            set_status(slug, 'partial', msg)
+            state['blocked'] = e
+            stop.set()
             return
         except Exception as e:
-            failures += 1
-            job_log(f"yt-dlp: {r['artist']} — {r['album']}: {e}")
-            if failures >= 8:
-                msg = f'yt-dlp falla repetidamente: {e}'
-                with _job_lock:
-                    _job['warning'] = msg
-                set_status(slug, 'partial', msg)
-                return
+            job_log(f'yt-dlp: {who}: {e}')
+            with _job_lock:
+                state['failures'] += 1
+                if state['failures'] >= 8:
+                    state['broken'] = e
+                    stop.set()
+        finally:
+            with _job_lock:
+                _yt['current'].remove(who)
         with _job_lock:
-            _job['done'] += 1
+            _yt['done'] += 1
+
+    with concurrent.futures.ThreadPoolExecutor(YT_WORKERS) as ex:
+        list(ex.map(one, rows))
+    return state['blocked'], state['broken']
+
+
+def _run_videos(slug):
+    global _yt_backoff
+    with db() as con:
+        row = con.execute('SELECT name FROM labels WHERE slug=?', (slug,)).fetchone()
+        if not row:
+            return
+        rows = con.execute("""SELECT a.album_key, a.artist, a.album, r.rtype FROM releases r
+                              JOIN albums a USING (album_key) WHERE r.label_slug=?
+                              ORDER BY r.year DESC""", (slug,)).fetchall()
+    with _job_lock:
+        _yt.update(name=row['name'], phase='YouTube', total=len(rows))
+    while True:
+        blocked, broken = _videos_pass(rows, row['name'])
+        with _job_lock:
+            if _yt['cancel']:
+                return
+        if not blocked:
+            break
+        # Insistir empeora el bloqueo y afecta a toda la IP: se espera, y cada vez más
+        with _job_lock:
+            _yt_backoff = min(max(YT_BLOCK_PAUSE, _yt_backoff * 2), YT_BLOCK_PAUSE_MAX)
+            pause = _yt_backoff
+            _yt.update(warning=f'YouTube ha bloqueado las búsquedas ({blocked}). Si no se resuelve, '
+                               'añade data/cookies.txt y pulsa ↻.', paused_until=time.time() + pause)
+        job_log(f'YouTube bloqueado: pausa de {pause // 60} min')
+        _yt_wake.clear()
+        _yt_wake.wait(pause)
+        with _job_lock:
+            _yt.update(warning=None, paused_until=None)
+            if _yt['cancel']:
+                return
+    if broken:
+        msg = f'yt-dlp falla repetidamente: {broken}'
+        with _job_lock:
+            _yt['warning'] = msg
+        set_status(slug, 'partial', msg)
+        return
     set_status(slug, 'done')
     job_log('Completado')
 
@@ -736,9 +839,13 @@ def _run_job(slug):
 def resume_jobs():
     """Un reinicio a medias no pierde nada: lo guardado no se vuelve a pedir."""
     with db() as con:
-        rows = con.execute("SELECT slug FROM labels WHERE status IN ('queued','running')").fetchall()
+        rows = con.execute("""SELECT slug, status FROM labels WHERE status IN ('queued','running','youtube')
+                              ORDER BY updated""").fetchall()
     for r in rows:
-        enqueue(r['slug'])
+        if r['status'] == 'youtube':
+            _push(_yt, _run_videos, r['slug'])
+        else:
+            _push(_data, _run_catalog, r['slug'])
 
 
 # ── Lecturas para la web ──────────────────────────────────────────────────────
@@ -923,8 +1030,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(data if data else {'error': 'No existe'}, 200 if data else 404)
             return
         if path == '/api/job':
-            with _job_lock:
-                self._json({**_job, 'queue': list(_job['queue'])})
+            self._json(job_state())
             return
         self._json({'error': 'No existe'}, 404)
 
@@ -952,6 +1058,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 slug = create_label(name, mb_ids, discogs_ids, types)
             else:
+                _yt_wake.set()   # ↻ reintenta ya tras un bloqueo; añadir uno nuevo no
                 with db() as con:
                     row = con.execute('SELECT sources FROM labels WHERE slug=?', (slug,)).fetchone()
                     if row and 'types' in d:
@@ -961,15 +1068,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not row:
                     self._json({'error': 'No existe'}, 404)
                     return
-            self._json({'ok': True, 'slug': slug, 'queued': enqueue(slug)})
+            enqueue(slug)
+            self._json({'ok': True, 'slug': slug})
             return
         if path == '/api/delete':
             with _job_lock:
-                if d.get('slug') == _job['slug'] and _job['running']:
-                    self._json({'error': 'Se está actualizando; espera a que termine'}, 409)
-                    return
-                if d.get('slug') in _job['queue']:
-                    _job['queue'].remove(d['slug'])
+                busy = d.get('slug') and d['slug'] in (_data['slug'], _yt['slug'])
+                if not busy:
+                    for stage in (_data, _yt):
+                        if d.get('slug') in stage['queue']:
+                            stage['queue'].remove(d['slug'])
+            if busy:
+                self._json({'error': 'Se está actualizando; espera a que termine'}, 409)
+                return
             with db() as con:
                 con.execute('DELETE FROM labels WHERE slug=?', (d.get('slug'),))
             self._json({'ok': True})
